@@ -1,36 +1,64 @@
 # tbuspp学习笔记
-## 名词学习
+## tbuspp是啥
+tbuspp就是微服务架构中的提供服务间通信功能的一个组件，它的好处之一是我们在写服务的时候可以专注于业务逻辑，而不用
+关注消息如何路由到目标服务实例。例如说我当前的服务`serv1`需要使用另一个服务`serv2`才能完成功能，我们只需要`serv2`
+的名字`dst_name`，通过在`serv1`中调用`SendMsgToStatelessServer(scr_name, dst_name, msg)`来完成服务间通信。
+tbuspp包含服务端和客户端，服务端提供消息的底层路由机制，客户端通过调用API来实现服务间通信。一个服务器节点只有一个
+服务端进程，但是可以有多个客户端实例，每个实例可以提供相同的服务，也可以提供不同的服务。
+
+## tbuspp运行机制
+一个微服务系统中各个服务器节点都运行着一个tbuspp服务端进程，这个进程称为一个tbuspp_agent，系统中所有这样的节点形成一个
+网格结构，服务间消息就在这个网格中进行路由。本地的服务实例（也就是tbuspp客户端）调用tbuspp API时，会通过共享内存
+的机制（在也就是挂载在`/dev/shm/`的`tmpfs`）和tbuspp_agent进行通信。tbuspp_agent会将从网络中收到的消息放入到共享内存
+里面，服务实例通过tbuspp API从共享内存中读走消息。在一个服务实例上线之前，tbuspp_agent还会向NS server注册该服务（的名字），
+以便其它服务实例能找到它。
+
+## 名词解释
 + RPC (remote procesure call)：远程过程调用，就是本地代码调用在另一台服务器上提供的服务（例如说一个接口）
     的一个过程。该过程涉及到函数名和入参的序列化和传输，以及服务提供方对其进行反序列化和根据函数名寻找
     服务进程id的步骤。
-+ 服务：就是一组接口。
++ 服务：就是实现某种功能的一组接口。
 + 服务实例：提供这组接口的一个进程，用(ip:port)标识。
-+ 服务名字：对服务的描述，就是gameid.服务名.区服.扩展字段
++ 服务名字：对服务的描述，在tbuspp里面就是gameid.区服.服务名.用户字段
 + 服务注册：一个服务实例在向外界提供服务之前，需要向服务中心注册以便调用方能发现它。
 + 服务发现：就是调用方找到被调用方的过程。
 + 名字服务：分布式系统中的核心组件之一，它负责为调用者寻找和匹配到合适的被调用者。
 
-## tbuspp是啥
-tbuspp就是分布式架构中的提供服务间通信的一个组件，它属于一个系统的基础设施组件层。一个分布式系统每个服务
-都有可能依赖于其他服务才能满足用户需求：例如说一个网上购物软件，用户想将某件商品加入到购物车，这个软件必须
-询问零售商数据库是否拥有足够货存。
-一个service mesh可以对某个服务发起的request进行路由，以找到最佳的服务提供节点。这样的话可以实现某种负载均
-衡。这种调用方不关心哪个服务实例提供服务的情况称为无状态路由，如果指定发送到某个服务实例的话称为有状态路由。
-当然一个服务开发者也可以自己指定通信规则，但随着系统规模变大，通信方式变得负责，这将变得不可能。
-一个service mesh可以看作是一个代理阵列，每个代理伴随着一个服务，request在这个代理网络中进行路由。
-
-## tbuspp运行机制
-两个相互之间通信的服务实例会建立两条tcp连接，分别用于两个方向上的传输。tbuspp内部处理事件时使用到了生产者-消费者模式。
-tbuspp中的service mesh中的节点为一个tbuspp_agent（也称为sideCar），服务里面的TbusppAPI和Tbuspp_agent通过共
-享内存通信。tbuspp_agent会将从网络中收到的消息放入到共享内存里面，服务实例通过TbusppAPI从共享内存中读走消息。tbuspp_agent还会和NS server进行通信来完成注册和上线
-其实tbuspp又分为客户端和服务端，每个节点都要运行一个服务端，然后再在上面写客户端。
-客户端和服务端之间的通信是通过共享内存的方式：也就是`/dev/shm/`对应的tmpfs
-
 ## tbuspp配置
-需要选名字服务环境，我就选DEV正式环境吧，对应的TbusppNS域名为devnet.tbusppns.oa.com，http端口为8082，tcp端
-口为9092。创建了个游戏：ruiqi_test, gameid为379440991，游戏key（密码）为428a2a1e6bab7b6aa5e1e755dc16a627
+在用tbuspp写服务之前，需要清楚我们的游戏是属于哪个名字服务环境的，这个名字服务环境对应一个TbusppNS的域名。
+例如说我选择的服务环境域名为devnet.tbusppns.oa.com，http端口为8082，tcp端口为9092。
+那么对应tbuspp_agent的配置为（在`/dev/shm/baseagent/conf/base_agent.conf`这个文件夹）：
+```
+conf_nameserver {
+    host: "devnet.tbusppns.oa.com"
+    port: 9092
+}
+// other configurations...
+```
+并且创建了个游戏叫ruiqi_test，这个游戏的gameid为379440991，游戏key为428a2a1e6bab7b6aa5e1e755dc16a627。
+这个gameid和key在客户端初始化时需要用到。
 
-## 一个简单的发送服务例子
+## 一个简单的例子：echo server
+这里省略具体的细节，只记录使用tbuspp的核心步骤，具体代码在echo_server.cpp里面。
+首先是一些配置常量的定义：
+```
+std::string conf = "/dev/shm/baseagent/conf/base_agent.conf";
+std::string game_id = "379440991";
+std::string game_password = "428a2a1e6bab7b6aa5e1e755dc16a627";
+std::string name = "test.echo_server";
+std::string user = "ricki";
+```
+首先是初始当前的tbuspp客户端，他会初始化一个事件句柄`event_handle`，我们通过这个句柄来监听网络
+中的消息到达事件：
+```
+int ret = baseagent::TBaseAgentClientInit(&event_handle, game_id.c_str(), game_password.c_str(), NULL, conf.c_str());
+```
+然后就是为我们当前这个服务创建一个名字实例，并向名字服务中心注册我们这个服务：
+```
+InstanceObj *serv_instance = baseagent::CreateInstance(game_id + "." + name, user);
+ret = baseagent::RegisterInstance(*recv_instance， baseagent::ENUM_OVERWRITE_WHEN_REG_CONFLICT);
+```
+随后就是启动（上线）我们这个服务，因为在从启动到上线需要经历一定时间，我们还需要
 在写客户端时，需要先定义一些重要的常量：
 ```
 DEFINE_string(conf, "/dev/shm/baseagent/conf/base_agent.conf", "base_agent.conf");
@@ -227,3 +255,6 @@ int PongBack(const char* msg,unsigned int msg_len,const InstanceObj* local,const
 }
 
 ```
+
+### misc
+原来DEFINE_string是google gflags库的宏，每一个DEFINE_string都定义了命令行中的一个参数选项。

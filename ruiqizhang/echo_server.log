@@ -1,0 +1,14 @@
+recv notify msg, code=0(baseagent_comm::kSUCC), cmd=4, dst=l14_379440991_l13_test_l12_echo_server_l10_ricki_l3_ip=9.134.125.154 port=9017_l2_11132201230951580827, data=l14_379440991_l13_test_l12_echo_server_l10_ricki_l3_ip=9.134.125.154 port=9017_l2_11132201230951580827,data_attr=
+recv notify msg, code=0(baseagent_comm::kSUCC), cmd=12, dst=l14_379440991_l13_test_l12_echo_server_l10_ricki_l3_ip=9.134.125.154 port=9017_l2_11132201230951580827, data=l14_379440991_l13_test_l12_echo_server_l10_ricki_l3_ip=9.134.125.154 port=9017_l2_11132201230951580827,data_attr=
+start instance succ
+waitting for msg...
+recv msg << ping: 0  
+recv msg << ping: 1  
+recv msg << ping: 2  
+recv msg << ping: 3  
+recv msg << ping: 4  
+recv msg << ping: 5  
+recv msg << ping: 6  
+recv msg << ping: 7  
+recv msg << ping: 8  
+recv msg << ping: 9  

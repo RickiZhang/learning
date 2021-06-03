@@ -10,21 +10,72 @@
 #include "tbuspp_stddef.h"
 
 #include <iostream>
+#include <fstream>
 
 #include <stdio.h>
 #include <signal.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <syslog.h>
 
-DEFINE_string(conf, "/dev/shm/baseagent/conf/base_agent.conf", "base_agent.conf");
-DEFINE_string(game_id, "379440991", "game id");
-DEFINE_string(game_password, "428a2a1e6bab7b6aa5e1e755dc16a627", "game password");
-DEFINE_string(echo_server, "test.echo_server", "echo server name");
-DEFINE_string(user_data, "", "user_data");
-DEFINE_int64(wait_timeout, 1, "wait event timeout, unit is ms");
+std::string conf = "/dev/shm/baseagent/conf/base_agent.conf";
+std::string game_id = "379440991";
+std::string game_password = "428a2a1e6bab7b6aa5e1e755dc16a627";
+std::string name = "test.echo_server";
+std::string user = "ricki";
+std::string working_dir = "/tmp/";
+std::string logfile = "echo_server.log";
+int timeout_ms = 1;
+
+static void skeleton_deamon(const char *new_dir, const char *logfile_name)
+{
+    if (!new_dir || !logfile_name)
+        exit(EXIT_FAILURE);
+
+    pid_t pid;
+
+    /* 先让子进程脱离父进程以在背景运行 */
+    pid = fork();
+    if (pid < 0)
+        exit(EXIT_FAILURE);
+    if (pid > 0)
+        exit(EXIT_SUCCESS);
+    
+    /* 让当前进程称为新会话组和新进程组的leader */
+    if (setsid() < 0)
+        exit(EXIT_FAILURE);
+
+    /* 重新配置进程的信号处理函数 */
+    signal(SIGCHLD, SIG_IGN);
+    signal(SIGHUP, SIG_IGN);
+
+    /* 再fork一次，这时候子进程就不是会话组的leader，以此避免进程获取终端 */
+    pid = fork();
+    if (pid < 0)
+        exit(EXIT_FAILURE);
+    if (pid > 0)
+        exit(EXIT_SUCCESS);
+
+    /* 设置新的文件权限掩码 */
+    umask(0);
+
+    /* 更改当前进程的工作目录 */
+    chdir(new_dir);
+
+    /* 关掉所有从父进程继承下来的文件 */
+    int fd = sysconf(_SC_OPEN_MAX);
+    while (fd >= 0)
+    {
+        close(fd--);
+    }
+    
+    // /* 打开日志文件 */
+    // openlog(logfile_name, LOG_PID, LOG_DAEMON);
+}
 
 void signal_handler(int sig)
 {
@@ -109,7 +160,7 @@ int ReadMsg(unsigned long long event_handle, char *buf, unsigned int maxlen, con
     int mask;
     const InstanceObj *local_instance = NULL;
     std::string debugstr;
-    int ret = baseagent::PollEvent(event_handle, FLAGS_wait_timeout, &local_instance, &mask, &debugstr);
+    int ret = baseagent::PollEvent(event_handle, timeout_ms, &local_instance, &mask, &debugstr);
 
     if (ret == tmsg::kEMPTY)
         return -1;
@@ -154,10 +205,16 @@ int ReadMsg(unsigned long long event_handle, char *buf, unsigned int maxlen, con
 
 int main(int argc, char *argv[])
 {
-    unsigned long long event_handle;
-    google::ParseCommandLineFlags(&argc, &argv, true);
+    // // daemonize the process
+    skeleton_deamon(working_dir.c_str(), logfile.c_str());
+    
+    // create log and redirect cout to log
+    int fd = open(logfile.c_str(), (O_RDWR | O_CREAT | O_TRUNC), 0644);
+    std::ofstream logstream(logfile.c_str());
+    std::cout.rdbuf(logstream.rdbuf());
 
-    //step 1: init client and env
+    unsigned long long event_handle;
+    // init client and env
     InitSignal();
     int ret = baseagent::InitErrMsg();
     if (ret)
@@ -166,7 +223,7 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
-    ret = baseagent::TBaseAgentClientInit(&event_handle, FLAGS_game_id.c_str(), FLAGS_game_password.c_str(), NULL, FLAGS_conf.c_str());
+    ret = baseagent::TBaseAgentClientInit(&event_handle, game_id.c_str(), game_password.c_str(), NULL, conf.c_str());
     if (ret)
     {
         std::cout << "TBaseAgentClientInit() failed, ret=" << ret << "," << baseagent::GetErrMsg(ret) << std::endl;
@@ -174,8 +231,7 @@ int main(int argc, char *argv[])
     }
 
     //step 2: register instance
-    InstanceObj *recv_instance = baseagent::CreateInstance(FLAGS_game_id + "." + FLAGS_echo_server, FLAGS_user_data);
-
+    InstanceObj *recv_instance = baseagent::CreateInstance(game_id + "." + name, user);
     ret = baseagent::RegisterInstance(*recv_instance, baseagent::ENUM_OVERWRITE_WHEN_REG_CONFLICT);
     if (ret)
     {
@@ -187,8 +243,6 @@ int main(int argc, char *argv[])
     //step 3: start instance
     RecvSysNotifyMsg notify_obj;
     baseagent::StartupCompleteNotifyFunc(&notify_obj);
-    baseagent::InstanceOnlineNotifyFunc(&notify_obj);
-    baseagent::InstanceOfflineNotifyFunc(&notify_obj);
 
     ret = baseagent::StartupInstance(*recv_instance);
     if (ret)
@@ -197,17 +251,15 @@ int main(int argc, char *argv[])
         exit(-1);
     }
 
-    static baseagent::IPeekMsg *peek_obj = baseagent::CreatePeekMsgObj();
-
     //step 4: wait startup notification
     while (!notify_obj.m_is_startup)
     {
-        ReadMsg(event_handle, NULL, 0);
+        if (ReadMsg(event_handle, NULL, 0) <= 0)
+            usleep(1000 * 10);
     }
 
     //step 6: waiting for msg
     std::cout << "waitting for msg..." << std::endl;
-
     const InstanceObj *remote_inst = NULL;
     while (true)
     {
@@ -222,5 +274,5 @@ int main(int argc, char *argv[])
     }
 
     baseagent::DeleteInstanceObj(recv_instance);
-    return 0;
+    exit(EXIT_SUCCESS);
 }
