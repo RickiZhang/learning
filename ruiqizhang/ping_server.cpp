@@ -126,9 +126,6 @@ int ReadMsg(unsigned long long event_handle, char *buf, unsigned int maxlen, con
 
     peek_obj->Attach(local_instance);
 
-    int has_recv_pkg = 0;
-    const int max_recv_pkg_per_loop = 100;
-
     ret = peek_obj->Peek(&index, &msg, &msg_len, &state, &remote_instance);
 
      //If the msg is notify,it will callback Notify,and the ret value is tmsg::kEMPTY
@@ -181,8 +178,6 @@ int main(int argc, char *argv[])
     //step 3: start instance
     RecvSysNotifyMsg notify_obj;
     baseagent::StartupCompleteNotifyFunc(&notify_obj);
-    baseagent::InstanceOnlineNotifyFunc(&notify_obj);
-    baseagent::InstanceOfflineNotifyFunc(&notify_obj);
 
     ret = baseagent::StartupInstance(*send_instance);
     if (ret)
@@ -194,7 +189,7 @@ int main(int argc, char *argv[])
     //step 4: wait startup notification
     while (!notify_obj.m_is_startup)
     {
-        ret = ReadMsg(event_handle, NULL, 0);
+        ReadMsg(event_handle, NULL, 0);
     }
 
     //step 6: send msg
@@ -205,9 +200,19 @@ int main(int argc, char *argv[])
     std::cout << "Start pinging..." << std::endl;
     
     const InstanceObj *remote_inst = NULL;
-
+    static unsigned int last_heart_time = 0;
+    unsigned int now;
     for (int i = 0; i < FLAGS_number_ping; ++i)
     {
+        now = time(NULL);
+        // send heartbeat to nameserver every 5s, or the nameserver will
+        // think we are offline
+        if (now - last_heart_time >= 5)
+        {
+            std::cout << "send heartbeat to nameserver..." << std::endl;
+            baseagent::SendHeartbeat(*send_instance);
+            last_heart_time = now;
+        }
         static char idstr[32];
         snprintf(idstr, sizeof(idstr), "%lld  ", msg_id++);
         std::string msg = "ping: " + std::string(idstr);

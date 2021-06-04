@@ -261,8 +261,20 @@ int main(int argc, char *argv[])
     //step 6: waiting for msg
     std::cout << "waitting for msg..." << std::endl;
     const InstanceObj *remote_inst = NULL;
+    static unsigned int last_heart_time = 0;
+    unsigned int now;
     while (true)
     {
+        now = time(NULL);
+        // send heartbeat to nameserver every 5s, or the nameserver will
+        // think we are offline
+        if (now - last_heart_time >= 5)
+        {
+            std::cout << "send heartbeat to nameserver..." << std::endl;
+            baseagent::SendHeartbeat(*recv_instance);
+            last_heart_time = now;
+        }
+        // read the message from network
         int msg_len = ReadMsg(event_handle, g_tmp_buffer, sizeof(g_tmp_buffer), &remote_inst);
         if (msg_len <= 0)
         {
