@@ -181,9 +181,6 @@ int ReadMsg(unsigned long long event_handle, char *buf, unsigned int maxlen, con
 
     peek_obj->Attach(local_instance);
 
-    int has_recv_pkg = 0;
-    const int max_recv_pkg_per_loop = 100;
-
     ret = peek_obj->Peek(&index, &msg, &msg_len, &state, &remote_instance);
 
      //If the msg is notify,it will callback Notify,and the ret value is tmsg::kEMPTY
